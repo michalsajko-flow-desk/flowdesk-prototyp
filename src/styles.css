@@ -34,7 +34,8 @@ code { font-family: 'IBM Plex Mono', monospace; background: var(--line-2); paddi
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 
 /* layout */
-.app { display: grid; grid-template-columns: 252px minmax(0, 1fr); height: 100%; }
+/* dvh = visible height incl. mobile browser toolbars (iOS Safari) */
+.app { display: grid; grid-template-columns: 252px minmax(0, 1fr); height: 100%; height: 100dvh; }
 .app.with-panel { grid-template-columns: 252px minmax(0, 1fr) 384px; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); border-left: 1px solid var(--line); }
 
@@ -103,23 +104,67 @@ code { font-family: 'IBM Plex Mono', monospace; background: var(--line-2); paddi
 .focus-bar { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: color-mix(in srgb, var(--c) 9%, #fff); border-bottom: 1px solid color-mix(in srgb, var(--c) 25%, #fff); font-size: 13px; }
 .focus-bar .link { margin-left: auto; }
 .messages { flex: 1; overflow-y: auto; padding: 16px 20px 8px; display: flex; flex-direction: column; gap: 4px; }
-.msg { display: flex; gap: 12px; padding: 8px 10px; border-radius: 10px; position: relative; transition: opacity .2s; }
+.msg { display: flex; gap: 12px; padding: 4px 10px; margin-top: 8px; border-radius: 10px; position: relative; transition: opacity .2s; }
+.msg.is-cont { margin-top: 0; padding-top: 0; }
 .msg:hover { background: #f8faf9; }
-.msg.has-task { border-left: 3px solid var(--c); padding-left: 10px; background: color-mix(in srgb, var(--c) 4%, #fff); }
-.msg.is-dim, .sysline.is-dim { opacity: .32; }
+.msg.is-dim, .sysline.is-dim, .event.is-dim { opacity: .32; }
+.av-space { width: 28px; flex: none; }
 .msg-body { min-width: 0; flex: 1; }
 .msg-meta { font-size: 13px; margin-bottom: 2px; }
 .msg-meta .muted { font-size: 12px; margin-left: 4px; }
-.msg-text { line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
-.task-label { color: var(--c); font-weight: 600; font-size: 12.5px; display: inline-flex; gap: 6px; margin-bottom: 2px; }
-.task-label:hover { text-decoration: underline; }
+.msg-text { line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* message written in the context of a task: colored bar + small label */
+.linked { border-left: 3px solid var(--c); padding: 1px 0 1px 10px; margin: 2px 0; }
+.task-label { display: flex; align-items: baseline; gap: 6px; max-width: 100%; font-size: 12px; color: var(--muted); text-align: left; }
+.task-label .mono { color: var(--c); font-weight: 600; flex: none; }
+.task-label:hover { color: var(--text); }
+
+/* compact task events (created / on review / closed / returned) */
+.event { display: flex; align-items: flex-start; gap: 12px; padding: 5px 10px; font-size: 12.5px; color: var(--muted); transition: opacity .2s; }
+.event.is-link { cursor: pointer; border-radius: 8px; }
+.event.is-link:hover { background: #f8faf9; }
+.ev-ic { width: 28px; flex: none; display: flex; justify-content: center; padding-top: 1px; }
+.ev-ic svg { width: 18px; height: 18px; padding: 3px; border-radius: 50%; box-sizing: border-box; }
+.ev-ic-new svg { background: var(--line-2); color: #46524f; }
+.ev-ic-review svg { background: var(--amber-soft); color: #9a5f06; }
+.ev-ic-closed svg { background: var(--green-soft); color: #22733f; }
+.ev-ic-returned svg { background: #efe9fa; color: var(--violet); }
+.ev-body { flex: 1; min-width: 0; line-height: 1.6; }
+.ev-time { flex: none; font-size: 11.5px; padding-top: 1px; }
+.ev-task { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; color: var(--text); padding: 0 6px 0 4px; margin-right: 4px; border-radius: 6px; vertical-align: bottom; }
+.ev-task:hover { background: var(--line-2); }
+.ev-task .mono { color: var(--c); font-weight: 600; white-space: nowrap; flex: none; }
+.ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ev-meta { white-space: nowrap; }
+
+/* status dot: hollow = open, amber = on review, green = closed */
+.sdot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.sdot.st-open { border: 1.5px solid #8a9693; }
+.sdot.st-review { background: var(--amber); }
+.sdot.st-closed { background: var(--green); }
+
+/* day separator */
+.day-sep { display: flex; align-items: center; gap: 10px; margin: 14px 10px 4px; font-size: 11.5px; color: var(--muted); font-weight: 500; }
+.day-sep::before, .day-sep::after { content: ''; flex: 1; height: 1px; background: var(--line-2); }
+
+/* task strip under the topic header */
+.task-strip { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: #fafcfb; overflow-x: auto; scrollbar-width: none; flex: none; }
+.task-strip::-webkit-scrollbar { display: none; }
+.strip-progress { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #22733f; padding: 5px 10px; border-radius: 16px; border: 1px solid var(--line); background: #fff; }
+.strip-progress.is-on { border-color: var(--green); background: var(--green-soft); }
+.prog { width: 28px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; display: inline-block; }
+.prog span { display: block; height: 100%; background: var(--green); border-radius: 2px; }
+.strip-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 220px; font-size: 12.5px; padding: 5px 10px; border-radius: 16px; border: 1px solid var(--line); background: #fff; }
+.strip-chip .mono { color: var(--c); font-weight: 600; white-space: nowrap; flex: none; }
+.strip-chip:hover { border-color: color-mix(in srgb, var(--c) 45%, #fff); }
+.strip-chip.is-active { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, #fff); }
+.strip-chip.is-closed .strip-title { text-decoration: line-through; color: var(--muted); }
+.strip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.strip-empty { font-size: 12.5px; color: var(--muted); padding-left: 4px; }
 .mention { background: var(--teal-soft); color: #0b6d60; border-radius: 4px; padding: 0 3px; font-weight: 500; }
 .tasklink { color: var(--c); background: color-mix(in srgb, var(--c) 12%, #fff); border-radius: 4px; padding: 0 4px; font-family: 'IBM Plex Mono', monospace; font-size: .9em; font-weight: 500; }
 .msg-action { position: absolute; right: 10px; top: 8px; font-size: 12px; color: var(--teal); background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; opacity: 0; }
 .msg:hover .msg-action { opacity: 1; }
-.created-card { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; text-align: left; border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: 8px; padding: 8px 12px; background: #fff; margin-top: 2px; }
-.created-card:hover { box-shadow: var(--shadow); }
-.created-card .pill { margin-left: 6px; }
 .sysline { font-size: 12.5px; color: var(--muted); padding: 4px 10px 4px 50px; transition: opacity .2s; }
 .sys-time { margin-right: 8px; font-size: 11.5px; }
 .readonly { padding: 16px 20px; color: var(--muted); border-top: 1px solid var(--line); }
@@ -242,8 +287,17 @@ code { font-family: 'IBM Plex Mono', monospace; background: var(--line-2); paddi
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 280px; z-index: 50; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow); }
   .sidebar.is-open { transform: none; }
   .scrim { display: block; position: fixed; inset: 0; background: rgba(20, 30, 28, .3); z-index: 45; }
-  .main { border-left: 0; height: 100%; }
-  .panel { position: fixed; inset: 0; z-index: 40; border-left: 0; }
+  .main { border-left: 0; height: 100%; height: 100dvh; }
+  /* full-screen panel sized to the visible viewport so Safari's bottom bar does not cover the composer */
+  .panel { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; z-index: 40; border-left: 0; }
+  /* iOS zooms into inputs with font-size < 16px and stays zoomed (page looked cut off on the right) */
+  .composer textarea, .field input, .field textarea { font-size: 16px; }
+  .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .task-strip { padding: 8px 10px; }
+  .event { padding: 5px 4px; gap: 10px; }
+  .msg { padding: 4px 4px; gap: 10px; }
+  .day-sep { margin: 14px 4px 4px; }
+  .strip-chip { max-width: 170px; }
   .only-mobile { display: grid; }
   .hide-mobile { display: none; }
   .topbar { padding: 10px 12px; gap: 6px; }

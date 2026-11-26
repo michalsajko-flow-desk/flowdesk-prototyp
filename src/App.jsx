@@ -44,6 +44,50 @@ function closerOf(t, s) {
 }
 const findMember = (name, members) => members.find(id => uname(id).toLowerCase() === name.toLowerCase());
 
+/* ---------- timeline: day separators, grouping ---------- */
+const DAYS_LONG = ['nedeľa', 'pondelok', 'utorok', 'streda', 'štvrtok', 'piatok', 'sobota'];
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+function dayLabel(at) {
+  const d = new Date(at); const today = new Date(); const yday = new Date(); yday.setDate(today.getDate() - 1);
+  if (sameDay(d, today)) return 'Dnes';
+  if (sameDay(d, yday)) return 'Včera';
+  return `${DAYS_LONG[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}.`;
+}
+const minutesOf = time => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
+const GROUP_MS = 5 * 60 * 1000;
+const isNear = (a, b) => (a.at && b.at ? Math.abs(b.at - a.at) <= GROUP_MS : Math.abs(minutesOf(b.time) - minutesOf(a.time)) <= 5);
+const plural = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
+
+/* turns raw messages into rows: day separators, merged task events, grouped messages */
+function buildTimeline(msgs) {
+  const rows = [];
+  let lastDay = null;
+  let prevMsg = null;
+  for (const m of msgs) {
+    const day = m.at ? new Date(m.at).toDateString() : 'old';
+    if (day !== lastDay) {
+      if (m.at) rows.push({ type: 'day', key: 'day-' + day, label: dayLabel(m.at) });
+      lastDay = day; prevMsg = null;
+    }
+    const last = rows[rows.length - 1];
+    if (m.kind === 'created') {
+      if (last && last.type === 'created' && last.author === m.author && isNear(last.items[last.items.length - 1], m)) last.items.push(m);
+      else rows.push({ type: 'created', key: m.id, author: m.author, items: [m] });
+      prevMsg = null;
+    } else if (m.kind === 'system') {
+      rows.push({ type: 'system', key: m.id, m });
+      prevMsg = null;
+    } else {
+      rows.push({ type: 'msg', key: m.id, m, cont: !!(prevMsg && prevMsg.author === m.author && isNear(prevMsg, m)) });
+      prevMsg = m;
+    }
+  }
+  return rows;
+}
+
+const STATUS_ORDER = { review: 0, open: 1, closed: 2 };
+const byKey = (a, b) => a.id.localeCompare(b.id, undefined, { numeric: true });
+
 /* ---------- small UI pieces ---------- */
 function Avatar({ id, size = 28 }) {
   const u = USERS[id];
@@ -53,6 +97,9 @@ function Avatar({ id, size = 28 }) {
 function StatusPill({ status }) {
   const s = STATUS[status];
   return <span className={`pill pill-${s.cls}`}>{s.label}</span>;
+}
+function StatusDot({ status }) {
+  return <span className={`sdot st-${status}`} title={STATUS[status].label} />;
 }
 function Icon({ name, size = 16 }) {
   const p = {
@@ -205,6 +252,7 @@ export default function App() {
   const [menu, setMenu] = useState(null);
   const [drawer, setDrawer] = useState(false);
   const [flash, setFlash] = useState(null);
+  const [showClosed, setShowClosed] = useState(false);
   const mainInput = useRef(null);
   const panelInput = useRef(null);
   const listRef = useRef(null);
@@ -229,12 +277,12 @@ export default function App() {
     d.notifications.push({ id: newId('n'), userId, text, topicId, taskId, read: false, time: nowTime() });
   };
   const addSystem = (d, topicId, text, taskId = null) => {
-    d.messages.push({ id: newId('m'), topicId, author: 'system', time: nowTime(), text, taskId, kind: 'system' });
+    d.messages.push({ id: newId('m'), topicId, author: 'system', time: nowTime(), at: Date.now(), text, taskId, kind: 'system' });
   };
 
   /* --- navigation --- */
   const myTopics = Object.values(data.topics).filter(t => t.members.includes(me));
-  const openTopic = id => { setActiveTopic(id); setView('topic'); setPanelId(null); setCtxId(null); setDrawer(false); };
+  const openTopic = id => { setActiveTopic(id); setView('topic'); setPanelId(null); setCtxId(null); setDrawer(false); setShowClosed(false); };
   const openTask = (id, opts = {}) => {
     const t = data.tasks[id]; if (!t) return;
     const r = rootId(t);
@@ -261,22 +309,22 @@ export default function App() {
 
   /* --- actions --- */
   function createTask(topicId, title, owner, due, parentId) {
-    let createdId = null;
+    // the id is computed up front: React runs the state updater later, so it cannot report back
+    const id = parentId
+      ? `${parentId}.${Object.values(data.tasks).filter(t => t.parentId === parentId).length + 1}`
+      : `FD-${data.seq}`;
     update(d => {
-      let id; let color;
+      let color;
       if (parentId) {
-        const p = d.tasks[parentId];
-        const n = Object.values(d.tasks).filter(t => t.parentId === parentId).length + 1;
-        id = `${parentId}.${n}`; color = p.color;
+        color = d.tasks[parentId].color;
       } else {
-        id = `FD-${d.seq}`; d.seq += 1; color = TASK_COLORS[d.colorIdx % TASK_COLORS.length]; d.colorIdx += 1;
+        d.seq += 1; color = TASK_COLORS[d.colorIdx % TASK_COLORS.length]; d.colorIdx += 1;
       }
-      createdId = id;
       d.tasks[id] = { id, topicId, title, owner, creator: d.me, status: 'open', due, parentId: parentId || null, color, returnReason: null, returnedBy: null };
-      d.messages.push({ id: newId('m'), topicId, author: d.me, time: nowTime(), text: '', taskId: parentId || id, kind: 'created', refId: id });
+      d.messages.push({ id: newId('m'), topicId, author: d.me, time: nowTime(), at: Date.now(), text: '', taskId: parentId || id, kind: 'created', refId: id });
       notify(d, owner, d.me, `${uname(d.me)} ti priradil(a) ${id} ${title}`, topicId, id);
     });
-    return createdId;
+    return id;
   }
 
   function markDone(id) {
@@ -381,7 +429,7 @@ export default function App() {
     }
 
     update(d => {
-      d.messages.push({ id: newId('m'), topicId: topic.id, author: me, time: nowTime(), text, taskId: ctx || null, kind: 'msg' });
+      d.messages.push({ id: newId('m'), topicId: topic.id, author: me, time: nowTime(), at: Date.now(), text, taskId: ctx || null, kind: 'msg' });
       const mentioned = new Set();
       for (const mm of text.matchAll(/@([\p{L}]+)/gu)) {
         const u = findMember(mm[1], members);
@@ -453,40 +501,102 @@ export default function App() {
     return <div className="actions">{btns}</div>;
   };
 
-  const MessageRow = ({ m, focus }) => {
-    const dim = focus && m.taskId !== focus;
-    if (m.kind === 'system') {
-      const t = m.taskId ? data.tasks[m.taskId] : null;
-      return <div className={`sysline ${dim ? 'is-dim' : ''}`} style={t ? { '--c': t.color } : undefined}><span className="sys-time">{m.time}</span>{m.text}</div>;
-    }
-    if (m.kind === 'created') {
-      const t = data.tasks[m.refId]; if (!t) return null;
+  /* task chip used inside event rows */
+  const EventTask = ({ t, withTitle }) => (
+    <button className="ev-task" style={{ '--c': t.color }} onClick={() => openTask(t.id)}>
+      <StatusDot status={t.status} /><span className="mono">{t.id}</span>{withTitle && <span className="ev-title">{t.title}</span>}
+    </button>
+  );
+
+  /* one row of the main chat timeline */
+  const TimelineRow = ({ row, focus }) => {
+    if (row.type === 'day') return <div className="day-sep"><span>{row.label}</span></div>;
+
+    if (row.type === 'created') {
+      const tasks = row.items.map(m => data.tasks[m.refId]).filter(Boolean);
+      if (!tasks.length) return null;
+      const dim = focus && row.items.every(m => m.taskId !== focus);
+      const first = tasks[0];
       return (
-        <div className={`msg msg-created ${dim ? 'is-dim' : ''}`}>
-          <Avatar id={m.author} />
-          <div className="msg-body">
-            <div className="msg-meta"><b>{uname(m.author)}</b> <span className="muted">{m.time}</span></div>
-            <button className="created-card" style={{ '--c': t.color }} onClick={() => openTask(t.id)}>
-              <Icon name="plus" size={14} /> <span className="mono">{t.id}</span> <b>{t.title}</b>
-              <span className="muted"> · {t.parentId ? 'riešiteľ' : 'vlastník'} {uname(t.owner)}{t.due ? ` · do ${t.due}` : ''}</span>
-              <StatusPill status={t.status} />
-            </button>
+        <div className={`event ${dim ? 'is-dim' : ''}`}>
+          <span className="ev-ic ev-ic-new"><Icon name="plus" size={12} /></span>
+          <div className="ev-body">
+            {tasks.length === 1 ? (
+              <>
+                <span>{uname(row.author)} vytvoril(a)</span> <EventTask t={first} withTitle />
+                <span className="ev-meta">{first.parentId ? 'rieši' : 'vlastník'} {uname(first.owner)}{first.due ? ` · do ${first.due}` : ''}</span>
+              </>
+            ) : (
+              <>
+                <span>{uname(row.author)} vytvoril(a) {tasks.length} {plural(tasks.length, 'úlohu', 'úlohy', 'úloh')}:</span>{' '}
+                {tasks.map(t => <EventTask key={t.id} t={t} withTitle />)}
+              </>
+            )}
           </div>
+          <span className="ev-time">{row.items[0].time}</span>
         </div>
       );
     }
+
+    if (row.type === 'system') {
+      const m = row.m;
+      const dim = focus && m.taskId !== focus;
+      const kind = m.text.startsWith('✔') ? 'closed' : m.text.startsWith('↩') ? 'returned' : 'review';
+      const icon = { closed: 'check', returned: 'ret', review: 'review' }[kind];
+      const t = m.taskId ? data.tasks[m.taskId] : null;
+      return (
+        <div className={`event ${dim ? 'is-dim' : ''} ${t ? 'is-link' : ''}`} onClick={t ? () => openTask(t.id) : undefined}>
+          <span className={`ev-ic ev-ic-${kind}`}><Icon name={icon} size={12} /></span>
+          <div className="ev-body">{m.text.replace(/^(✔|↩)\s*/, '')}</div>
+          <span className="ev-time">{m.time}</span>
+        </div>
+      );
+    }
+
+    const { m, cont } = row;
+    const dim = focus && m.taskId !== focus;
     const t = m.taskId ? data.tasks[m.taskId] : null;
+    const text = <div className="msg-text"><RichText text={m.text} tasks={data.tasks} onTask={openTask} /></div>;
     return (
-      <div className={`msg ${t ? 'has-task' : ''} ${dim ? 'is-dim' : ''}`} style={t ? { '--c': t.color } : undefined}>
-        <Avatar id={m.author} />
+      <div className={`msg ${cont ? 'is-cont' : ''} ${dim ? 'is-dim' : ''}`}>
+        {cont ? <span className="av-space" /> : <Avatar id={m.author} />}
         <div className="msg-body">
-          <div className="msg-meta"><b>{uname(m.author)}</b> <span className="muted">{m.time}</span></div>
-          {t && <button className="task-label" onClick={() => openTask(t.id)}><span className="mono">{t.id}</span> {t.title}</button>}
-          <div className="msg-text"><RichText text={m.text} tasks={data.tasks} onTask={openTask} /></div>
+          {!cont && <div className="msg-meta"><b>{uname(m.author)}</b> <span className="muted">{m.time}</span></div>}
+          {t ? (
+            <div className="linked" style={{ '--c': t.color }}>
+              <button className="task-label" onClick={() => openTask(t.id)}><span className="mono">{t.id}</span> <span className="ellipsis">{t.title}</span></button>
+              {text}
+            </div>
+          ) : text}
         </div>
         {isMember && !t && !panelId && (
           <button className="msg-action" title="Vytvoriť z tejto správy úlohu" onClick={() => { setDraft('+ ' + m.text.replace(/@[\p{L}]+/gu, '').trim() + ' '); requestAnimationFrame(() => mainInput.current && mainInput.current.focus()); }}>+ úloha</button>
         )}
+      </div>
+    );
+  };
+
+  /* strip of the topic's tasks under the header + progress (closed / all tasks) */
+  const TaskStrip = () => {
+    const roots = topicTasks.filter(t => !t.parentId);
+    if (!roots.length) return null;
+    const closed = roots.filter(t => t.status === 'closed').length;
+    const shown = roots.filter(t => showClosed || t.status !== 'closed')
+      .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || byKey(a, b));
+    return (
+      <div className="task-strip">
+        <button className={`strip-progress ${showClosed ? 'is-on' : ''}`} onClick={() => setShowClosed(v => !v)}
+          title={showClosed ? 'Skryť uzavreté' : 'Zobraziť aj uzavreté'}>
+          <span className="prog"><span style={{ width: `${Math.round((closed / roots.length) * 100)}%` }} /></span>
+          {closed}/{roots.length}
+        </button>
+        {shown.map(t => (
+          <button key={t.id} className={`strip-chip ${panelId === t.id ? 'is-active' : ''} ${t.status === 'closed' ? 'is-closed' : ''}`}
+            style={{ '--c': t.color }} onClick={() => openTask(t.id)}>
+            <StatusDot status={t.status} /><span className="mono">{t.id}</span><span className="strip-title">{t.title}</span>
+          </button>
+        ))}
+        {!shown.length && <span className="strip-empty">Všetko uzavreté</span>}
       </div>
     );
   };
@@ -613,6 +723,7 @@ export default function App() {
 
         {view === 'topic' && topic && (
           <section className="chat">
+            <TaskStrip />
             {focus && panelTask && (
               <div className="focus-bar" style={{ '--c': panelTask.color }}>
                 Fokus: <span className="mono">{panelTask.id}</span> {panelTask.title}
@@ -620,13 +731,13 @@ export default function App() {
               </div>
             )}
             <div className="messages" ref={listRef}>
-              {topicMessages.map(m => <MessageRow key={m.id} m={m} focus={focus} />)}
+              {buildTimeline(topicMessages).map(row => <TimelineRow key={row.key} row={row} focus={focus} />)}
             </div>
             {isMember ? (
               <Composer
                 members={memberIds} taskList={topicTasks} draft={draft} setDraft={setDraft} inputRef={mainInput}
                 context={ctxTask} onClearContext={() => setCtxId(null)}
-                placeholder={ctxTask ? `Píšeš k ${ctxTask.id}…  (@ osoba · # úloha · /hotovo)` : 'Napíš správu…  (@ osoba · # úloha · + nová úloha)'}
+                placeholder={ctxTask ? `Píšeš k ${ctxTask.id}…` : 'Napíš správu…'}
                 onSend={txt => handleSend(txt, ctxId, false)}
               />
             ) : (
@@ -730,7 +841,7 @@ export default function App() {
               <Composer
                 members={memberIds} taskList={topicTasks} draft={panelDraft} setDraft={setPanelDraft} inputRef={panelInput}
                 context={t} contextFixed
-                placeholder={canAddSub ? `Napíš k ${t.id}…  (+ podúloha @meno)` : `Napíš k ${t.id}…`}
+                placeholder={`Napíš k ${t.id}…`}
                 onSend={txt => handleSend(txt, t.id, true)}
               />
             )}
@@ -765,7 +876,7 @@ export default function App() {
       {modal && modal.type === 'help' && (
         <Modal wide onClose={() => { setModal(null); if (!data.helpSeen) update(d => { d.helpSeen = true; }); }} title="Ako vyskúšať prototyp">
           <ol className="steps">
-            <li><b>Si Michal.</b> V chate klikni na štítok <span className="mono">FD-12</span>. Otvorí sa panel úlohy a ostatné správy sa stlmia (fokus).</li>
+            <li><b>Si Michal.</b> V lište úloh pod názvom témy ťukni na <span className="mono">FD-12</span>. Otvorí sa panel úlohy a ostatné správy sa stlmia (fokus). Číslo vľavo v lište (napr. 1/3) je pokrok témy – ťuknutím zobrazíš aj uzavreté úlohy.</li>
             <li>Napíš do hlavného chatu: <code>+ Pripraviť harmonogram @Jana pi</code>. Vznikne úloha s vlastníkom Jana a termínom piatok.</li>
             <li><b>Prepni sa na Janu</b> (avatar vpravo hore). V paneli FD-12 je podúloha FD-12.1 na kontrole. Uzavri ju, alebo ju vráť Petrovi s dôvodom.</li>
             <li><b>Prepni sa na Petra.</b> V „Moje úlohy“ uvidíš vrátenú podúlohu aj s dôvodom. Označ ju „Hotovo“ a ide znova Jane na kontrolu.</li>

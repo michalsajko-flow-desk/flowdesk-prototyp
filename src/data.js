@@ -18,8 +18,10 @@ const task = (id, topicId, title, owner, creator, status, due, extra = {}) => ({
   id, topicId, title, owner, creator, status, due, parentId: null, returnReason: null, returnedBy: null, ...extra,
 });
 
+const todayAt = time => { const [h, m] = time.split(':').map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime(); };
+
 const msg = (i, topicId, author, time, text, taskId = null, kind = 'msg', refId = null) => ({
-  id: 'seed' + i, topicId, author, time, text, taskId, kind, refId,
+  id: 'seed' + i, topicId, author, time, at: todayAt(time), text, taskId, kind, refId,
 });
 
 export function seedState() {
